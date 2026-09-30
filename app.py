@@ -14,42 +14,62 @@ citta = st.sidebar.text_input("Città da scandagliare", value="Padova")
 avvia_scansione = st.sidebar.button("Avvia Scansione Lead")
 
 def cerca_pizzerie(nome_citta):
-    # Server Overpass specchio ad alte prestazioni
-    endpoints = [
-        "https://overpass.kumi.systems/api/interpreter",
-        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-        "https://overpass-api.de/api/interpreter"
-    ]
+    headers = {'User-Agent': 'PizzaFounderApp/2.0'}
     
+    # 1. Ottieni le coordinate della città per fare una ricerca per Bounding Box ultra-veloce
+    try:
+        nom_url = "https://nominatim.openstreetmap.org/search"
+        nom_params = {'city': nome_citta, 'country': 'Italy', 'format': 'json', 'limit': 1}
+        nom_res = requests.get(nom_url, params=nom_params, headers=headers, timeout=5)
+        
+        if nom_res.status_code != 200 or not nom_res.json():
+            st.warning(f"Impossibile individuare i confini geografici di '{nome_citta}'. Controlla l'ortografia.")
+            return []
+            
+        bbox = nom_res.json()[0]['boundingbox'] # [south, north, west, east]
+        s, n, w, e = bbox[0], bbox[1], bbox[2], bbox[3]
+    except Exception as err:
+        st.error(f"Errore nella localizzazione della città: {err}")
+        return []
+
+    # 2. Query Overpass basata su Bounding Box (istantanea e leggera)
     query = f"""
-    [out:json][timeout:30];
-    area["name"="{nome_citta}"]["boundary"="administrative"]->.searchArea;
+    [out:json][timeout:15];
     (
-      node["cuisine"~"pizza",i](area.searchArea);
-      way["cuisine"~"pizza",i](area.searchArea);
-      node["amenity"="restaurant"]["name"~"pizzeria",i](area.searchArea);
-      way["amenity"="restaurant"]["name"~"pizzeria",i](area.searchArea);
+      node["cuisine"~"pizza",i]({s},{w},{n},{e});
+      way["cuisine"~"pizza",i]({s},{w},{n},{e});
+      node["amenity"="restaurant"]["name"~"pizzeria",i]({s},{w},{n},{e});
+      way["amenity"="restaurant"]["name"~"pizzeria",i]({s},{w},{n},{e});
     );
     out center tags;
     """
     
+    endpoints = [
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://z.overpass-api.de/api/interpreter"
+    ]
+    
+    pizzerie = []
+    pizzerie_viste = set()
+    
     for url in endpoints:
         try:
-            res = requests.post(url, data={'data': query}, timeout=25)
+            res = requests.post(url, data={'data': query}, timeout=10)
             if res.status_code == 200:
                 data = res.json()
-                pizzerie = []
                 for item in data.get('elements', []):
                     tags = item.get('tags', {})
                     nome = tags.get('name')
-                    if not nome:
+                    if not nome or nome in pizzerie_viste:
                         continue
                     
+                    pizzerie_viste.add(nome)
                     sito = tags.get('website') or tags.get('contact:website') or ''
                     telefono = tags.get('phone') or tags.get('contact:phone') or ''
                     strada = tags.get('addr:street', '')
                     civico = tags.get('addr:housenumber', '')
-                    indirizzo = f"{strada} {civico}".strip() if strada else f"{nome_citta}"
+                    indirizzo = f"{strada} {civico}".strip() if strada else nome_citta
                     
                     pizzerie.append({
                         'Nome': nome,
@@ -61,8 +81,8 @@ def cerca_pizzerie(nome_citta):
                     return pizzerie
         except Exception:
             continue
-            
-    st.error("I server di mappa sono temporaneamente occupati. Riprova tra qualche secondo.")
+
+    st.error("I server di mappa non hanno risposto in tempo. Riprova tra pochi secondi.")
     return []
 
 def analizza_sito(url):
@@ -142,4 +162,4 @@ if avvia_scansione:
             csv = df_filtrato.to_csv(index=False).encode('utf-8')
             st.download_button(label="📥 Scarica Lead in CSV / Excel", data=csv, file_name=f"lead_pizzerie_{citta}.csv", mime="text/csv")
         else:
-            st.warning("Nessuna pizzeria trovata. Riprova con un'altra città o verifica l'ortografia.")
+            st.warning("Nessuna pizzeria trovata per la città indicata.")
