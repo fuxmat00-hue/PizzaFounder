@@ -14,32 +14,37 @@ citta = st.sidebar.text_input("Città da scandagliare", value="Padova")
 avvia_scansione = st.sidebar.button("Avvia Scansione Lead")
 
 def cerca_pizzerie(nome_citta):
-    headers = {'User-Agent': 'PizzaFounderApp/2.0'}
+    headers = {
+        'User-Agent': 'PizzaFounderApp/3.0 (contact@pizzafounder.app)',
+        'Accept-Language': 'it-IT,it;q=0.9'
+    }
     
-    # 1. Ottieni le coordinate della città per fare una ricerca per Bounding Box ultra-veloce
+    # 1. Geocoding città tramite Nominatim per Bounding Box
     try:
         nom_url = "https://nominatim.openstreetmap.org/search"
-        nom_params = {'city': nome_citta, 'country': 'Italy', 'format': 'json', 'limit': 1}
-        nom_res = requests.get(nom_url, params=nom_params, headers=headers, timeout=5)
+        nom_params = {'q': f"{nome_citta}, Italia", 'format': 'json', 'limit': 1}
+        nom_res = requests.get(nom_url, params=nom_params, headers=headers, timeout=8)
         
         if nom_res.status_code != 200 or not nom_res.json():
-            st.warning(f"Impossibile individuare i confini geografici di '{nome_citta}'. Controlla l'ortografia.")
+            st.warning(f"Impossibile individuare '{nome_citta}'. Verifica l'ortografia.")
             return []
             
         bbox = nom_res.json()[0]['boundingbox'] # [south, north, west, east]
         s, n, w, e = bbox[0], bbox[1], bbox[2], bbox[3]
     except Exception as err:
-        st.error(f"Errore nella localizzazione della città: {err}")
+        st.error(f"Errore di localizzazione: {err}")
         return []
 
-    # 2. Query Overpass basata su Bounding Box (istantanea e leggera)
+    # 2. Query Overpass ad alte prestazioni su Bounding Box
     query = f"""
-    [out:json][timeout:15];
+    [out:json][timeout:25];
     (
-      node["cuisine"~"pizza",i]({s},{w},{n},{e});
-      way["cuisine"~"pizza",i]({s},{w},{n},{e});
-      node["amenity"="restaurant"]["name"~"pizzeria",i]({s},{w},{n},{e});
-      way["amenity"="restaurant"]["name"~"pizzeria",i]({s},{w},{n},{e});
+      node["amenity"="restaurant"]["cuisine"~"pizza",i]({s},{w},{n},{e});
+      way["amenity"="restaurant"]["cuisine"~"pizza",i]({s},{w},{n},{e});
+      node["amenity"="fast_food"]["cuisine"~"pizza",i]({s},{w},{n},{e});
+      way["amenity"="fast_food"]["cuisine"~"pizza",i]({s},{w},{n},{e});
+      node["name"~"pizzeria",i]({s},{w},{n},{e});
+      way["name"~"pizzeria",i]({s},{w},{n},{e});
     );
     out center tags;
     """
@@ -47,17 +52,17 @@ def cerca_pizzerie(nome_citta):
     endpoints = [
         "https://overpass-api.de/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
-        "https://z.overpass-api.de/api/interpreter"
+        "https://lz4.overpass-api.de/api/interpreter"
     ]
-    
-    pizzerie = []
-    pizzerie_viste = set()
     
     for url in endpoints:
         try:
-            res = requests.post(url, data={'data': query}, timeout=10)
+            res = requests.post(url, data={'data': query}, headers=headers, timeout=15)
             if res.status_code == 200:
                 data = res.json()
+                pizzerie = []
+                pizzerie_viste = set()
+                
                 for item in data.get('elements', []):
                     tags = item.get('tags', {})
                     nome = tags.get('name')
@@ -82,7 +87,7 @@ def cerca_pizzerie(nome_citta):
         except Exception:
             continue
 
-    st.error("I server di mappa non hanno risposto in tempo. Riprova tra pochi secondi.")
+    st.error("I server di mappa sono occupati. Riprova tra 10 secondi.")
     return []
 
 def analizza_sito(url):
@@ -113,7 +118,7 @@ def pulisci_telefono(phone):
     return cleaned
 
 if avvia_scansione:
-    with st.spinner(f"Scandagliamento completo in corso a {citta}..."):
+    with st.spinner(f"Scandagliamento in corso a {citta}..."):
         risultati = cerca_pizzerie(citta)
         if risultati:
             st.success(f"Trovate {len(risultati)} pizzerie! Analisi dei siti in corso...")
