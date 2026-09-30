@@ -14,50 +14,55 @@ citta = st.sidebar.text_input("Città da scandagliare", value="Milano")
 avvia_scansione = st.sidebar.button("Avvia Scansione Lead")
 
 def cerca_pizzerie(nome_citta):
-    # Server di fallback per la massima affidabilità
-    endpoints = [
-        "https://overpass-api.de/api/interpreter",
-        "https://lz4.overpass-api.de/api/interpreter",
-        "https://z.overpass-api.de/api/interpreter"
-    ]
+    # Motore di ricerca ultra-veloce e stabile
+    url = "https://nominatim.openstreetmap.org/search"
+    params = {
+        'q': f'pizzeria {nome_citta}',
+        'format': 'json',
+        'addressdetails': 1,
+        'extratags': 1,
+        'limit': 50
+    }
+    headers = {
+        'User-Agent': 'PizzeriaLeadFinderApp/1.0 (contact@leadfinder.com)'
+    }
     
-    query = f"""
-    [out:json][timeout:25];
-    area["name"="{nome_citta}"] -> .searchArea;
-    (
-      node["cuisine"="pizza"](area.searchArea);
-      way["cuisine"="pizza"](area.searchArea);
-      node["amenity"="restaurant"]["name"~"Pizzeria",i](area.searchArea);
-      way["amenity"="restaurant"]["name"~"Pizzeria",i](area.searchArea);
-    );
-    out center tags;
-    """
-    
-    for url in endpoints:
-        try:
-            res = requests.get(url, params={'data': query}, timeout=25)
-            if res.status_code == 200:
-                data = res.json()
-                pizzerie = []
-                for item in data.get('elements', []):
-                    tags = item.get('tags', {})
-                    nome = tags.get('name', 'Pizzeria senza nome')
-                    sito = tags.get('website', '')
-                    telefono = tags.get('phone', tags.get('contact:phone', ''))
-                    strada = tags.get('addr:street', '')
-                    civico = tags.get('addr:housenumber', '')
-                    indirizzo = f"{strada} {civico}".strip() or "Indirizzo non specificato"
-                    pizzerie.append({
-                        'Nome': nome,
-                        'Sito_Web': sito,
-                        'Telefono': telefono,
-                        'Indirizzo': indirizzo
-                    })
-                return pizzerie
-        except Exception:
-            continue
-            
-    st.error("I server di ricerca geografica sono temporaneamente occupati. Riprova tra 30 secondi o prova un'altra città.")
+    try:
+        res = requests.get(url, params=params, headers=headers, timeout=10)
+        if res.status_code == 200:
+            data = res.json()
+            pizzerie = []
+            for item in data:
+                tags = item.get('extratags', {})
+                display = item.get('display_name', '')
+                parti = display.split(',')
+                nome = parti[0] if parti else 'Pizzeria'
+                
+                sito = tags.get('website', '') or tags.get('contact:website', '')
+                telefono = tags.get('phone', '') or tags.get('contact:phone', '')
+                
+                addr = item.get('address', {})
+                strada = addr.get('road', '')
+                civico = addr.get('house_number', '')
+                
+                if strada:
+                    indirizzo = f"{strada} {civico}".strip()
+                elif len(parti) > 1:
+                    indirizzo = parti[1].strip()
+                else:
+                    indirizzo = "Indirizzo non specificato"
+                    
+                pizzerie.append({
+                    'Nome': nome,
+                    'Sito_Web': sito,
+                    'Telefono': telefono,
+                    'Indirizzo': indirizzo
+                })
+            return pizzerie
+    except Exception as e:
+        st.error(f"Errore di connessione: {e}")
+        return []
+        
     return []
 
 def analizza_sito(url):
@@ -137,4 +142,4 @@ if avvia_scansione:
             csv = df_filtrato.to_csv(index=False).encode('utf-8')
             st.download_button(label="📥 Scarica Lead in CSV / Excel", data=csv, file_name=f"lead_pizzerie_{citta}.csv", mime="text/csv")
         else:
-            st.warning("Nessuna pizzeria trovata in questa città. Prova ad inserire un'altra città (es. Milano, Bologna, Roma, Verona).")
+            st.warning("Nessun risultato trovato. Prova con un'altra città (es. Milano, Roma, Bologna, Torino).")
