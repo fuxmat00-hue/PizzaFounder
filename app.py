@@ -10,61 +10,59 @@ st.title("🍕 Pizzeria Lead Finder & Sales CRM")
 st.write("Scandaglia il web per trovare pizzerie senza sito web, con menu PDF o dipendenti da Glovo/JustEat.")
 
 st.sidebar.header("🔍 Parametri di Ricerca")
-citta = st.sidebar.text_input("Città da scandagliare", value="Milano")
+citta = st.sidebar.text_input("Città da scandagliare", value="Padova")
 avvia_scansione = st.sidebar.button("Avvia Scansione Lead")
 
 def cerca_pizzerie(nome_citta):
-    url = "https://nominatim.openstreetmap.org/search"
-    params = {
-        'q': f'pizzeria {nome_citta}',
-        'format': 'json',
-        'addressdetails': 1,
-        'extratags': 1,
-        'limit': 50
-    }
-    headers = {
-        'User-Agent': 'PizzeriaLeadFinderApp/1.0 (contact@leadfinder.com)'
-    }
+    # Server Overpass specchio ad alte prestazioni
+    endpoints = [
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+        "https://overpass-api.de/api/interpreter"
+    ]
     
-    try:
-        res = requests.get(url, params=params, headers=headers, timeout=10)
-        if res.status_code == 200:
-            data = res.json()
-            pizzerie = []
-            for item in data:
-                if not isinstance(item, dict):
-                    continue
-                
-                tags = item.get('extratags') or {}
-                display = item.get('display_name', '')
-                parti = display.split(',')
-                nome = parti[0] if parti else 'Pizzeria'
-                
-                sito = tags.get('website', '') or tags.get('contact:website', '') or ''
-                telefono = tags.get('phone', '') or tags.get('contact:phone', '') or ''
-                
-                addr = item.get('address') or {}
-                strada = addr.get('road', '') or ''
-                civico = addr.get('house_number', '') or ''
-                
-                if strada:
-                    indirizzo = f"{strada} {civico}".strip()
-                elif len(parti) > 1:
-                    indirizzo = parti[1].strip()
-                else:
-                    indirizzo = "Indirizzo non specificato"
+    query = f"""
+    [out:json][timeout:30];
+    area["name"="{nome_citta}"]["boundary"="administrative"]->.searchArea;
+    (
+      node["cuisine"~"pizza",i](area.searchArea);
+      way["cuisine"~"pizza",i](area.searchArea);
+      node["amenity"="restaurant"]["name"~"pizzeria",i](area.searchArea);
+      way["amenity"="restaurant"]["name"~"pizzeria",i](area.searchArea);
+    );
+    out center tags;
+    """
+    
+    for url in endpoints:
+        try:
+            res = requests.post(url, data={'data': query}, timeout=25)
+            if res.status_code == 200:
+                data = res.json()
+                pizzerie = []
+                for item in data.get('elements', []):
+                    tags = item.get('tags', {})
+                    nome = tags.get('name')
+                    if not nome:
+                        continue
                     
-                pizzerie.append({
-                    'Nome': nome,
-                    'Sito_Web': sito,
-                    'Telefono': telefono,
-                    'Indirizzo': indirizzo
-                })
-            return pizzerie
-    except Exception as e:
-        st.error(f"Errore durante la ricerca: {e}")
-        return []
-        
+                    sito = tags.get('website') or tags.get('contact:website') or ''
+                    telefono = tags.get('phone') or tags.get('contact:phone') or ''
+                    strada = tags.get('addr:street', '')
+                    civico = tags.get('addr:housenumber', '')
+                    indirizzo = f"{strada} {civico}".strip() if strada else f"{nome_citta}"
+                    
+                    pizzerie.append({
+                        'Nome': nome,
+                        'Sito_Web': sito,
+                        'Telefono': telefono,
+                        'Indirizzo': indirizzo
+                    })
+                if pizzerie:
+                    return pizzerie
+        except Exception:
+            continue
+            
+    st.error("I server di mappa sono temporaneamente occupati. Riprova tra qualche secondo.")
     return []
 
 def analizza_sito(url):
@@ -95,7 +93,7 @@ def pulisci_telefono(phone):
     return cleaned
 
 if avvia_scansione:
-    with st.spinner(f"Scandagliamento in corso a {citta}..."):
+    with st.spinner(f"Scandagliamento completo in corso a {citta}..."):
         risultati = cerca_pizzerie(citta)
         if risultati:
             st.success(f"Trovate {len(risultati)} pizzerie! Analisi dei siti in corso...")
@@ -144,4 +142,4 @@ if avvia_scansione:
             csv = df_filtrato.to_csv(index=False).encode('utf-8')
             st.download_button(label="📥 Scarica Lead in CSV / Excel", data=csv, file_name=f"lead_pizzerie_{citta}.csv", mime="text/csv")
         else:
-            st.warning("Nessun risultato trovato. Prova con un'altra città (es. Milano, Roma, Bologna, Torino).")
+            st.warning("Nessuna pizzeria trovata. Riprova con un'altra città o verifica l'ortografia.")
