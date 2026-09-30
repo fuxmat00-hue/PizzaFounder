@@ -14,7 +14,6 @@ citta = st.sidebar.text_input("Città da scandagliare", value="Milano")
 avvia_scansione = st.sidebar.button("Avvia Scansione Lead")
 
 def cerca_pizzerie(nome_citta):
-    # Motore di ricerca ultra-veloce e stabile
     url = "https://nominatim.openstreetmap.org/search"
     params = {
         'q': f'pizzeria {nome_citta}',
@@ -33,17 +32,20 @@ def cerca_pizzerie(nome_citta):
             data = res.json()
             pizzerie = []
             for item in data:
-                tags = item.get('extratags', {})
+                if not isinstance(item, dict):
+                    continue
+                
+                tags = item.get('extratags') or {}
                 display = item.get('display_name', '')
                 parti = display.split(',')
                 nome = parti[0] if parti else 'Pizzeria'
                 
-                sito = tags.get('website', '') or tags.get('contact:website', '')
-                telefono = tags.get('phone', '') or tags.get('contact:phone', '')
+                sito = tags.get('website', '') or tags.get('contact:website', '') or ''
+                telefono = tags.get('phone', '') or tags.get('contact:phone', '') or ''
                 
-                addr = item.get('address', {})
-                strada = addr.get('road', '')
-                civico = addr.get('house_number', '')
+                addr = item.get('address') or {}
+                strada = addr.get('road', '') or ''
+                civico = addr.get('house_number', '') or ''
                 
                 if strada:
                     indirizzo = f"{strada} {civico}".strip()
@@ -60,7 +62,7 @@ def cerca_pizzerie(nome_citta):
                 })
             return pizzerie
     except Exception as e:
-        st.error(f"Errore di connessione: {e}")
+        st.error(f"Errore durante la ricerca: {e}")
         return []
         
     return []
